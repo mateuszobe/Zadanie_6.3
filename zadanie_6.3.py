@@ -1,5 +1,6 @@
 from sqlalchemy import create_engine, Table, Column, Integer, String, Float, Date, MetaData
-from sqlalchemy.sql import select
+from sqlalchemy.sql import select, update, delete
+import csv
 
 def create_database():
     #tworzymy połączenie z bazą danych SQLite:
@@ -21,6 +22,7 @@ def create_database():
     #definiujemy tabelę 'measurements':
     measurements = Table(
         'measurements', meta,
+        Column('id', Integer, primary_key=True, autoincrement=True),
         Column('station', String),
         Column('date', Date),
         Column('precip', Float),
@@ -30,37 +32,70 @@ def create_database():
     #tworzymy tabele w bazie danych:
     meta.create_all(engine)
 
-    #dodajemy przykładowe dane do tabeli 'stations':
-    stations_data = [
-        {'station': 'USC00519397', 'latitude': 21.2716, 'longitude': -157.8168, 'elevation': 3.0, 'name': 'WAIKIKI 717.2', 'country': 'US', 'state': 'HI'},
-        {'station': 'USC00513117', 'latitude': 21.4234, 'longitude': -157.8015, 'elevation': 14.6, 'name': 'KANEOHE 838.1', 'country': 'US', 'state': 'HI'},
-    ]
-
-    #dodajemy dane do tabeli 'measurements':
-    measurements_data = [
-        {'station': 'USC00519397', 'date': '2010-01-01', 'precip': 0.08, 'tobs': 65},
-        {'station': 'USC00519397', 'date': '2010-01-02', 'precip': 0.0, 'tobs': 63},
-    ]
-
-    #łączymy się z bazą danych i wstawiamy dane:
+    #połączenie z bazą danych:
     conn = engine.connect()
 
-    #wstawiamy dane do tabeli 'stations':
-    conn.execute(stations.insert(), stations_data)
+    #wczytujemy dane z CSV do tabeli 'stations':
+    with open('clean_stations.csv', newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        stations_data = [
+            {
+                'station': row['station'],
+                'latitude': float(row['latitude']),
+                'longitude': float(row['longitude']),
+                'elevation': float(row['elevation']),
+                'name': row['name'],
+                'country': row['country'],
+                'state': row['state']
+            }
+            for row in reader
+        ]
+        conn.execute(stations.insert(), stations_data)
 
-    #wstawiamy dane do tabeli 'measurements':
-    conn.execute(measurements.insert(), measurements_data)
+    #wczytujemy dane z CSV do tabeli 'measurements':
+    with open('clean_measure.csv', newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        measurements_data = [
+            {
+                'station': row['station'],
+                'date': row['date'],
+                'precip': float(row['precip']) if row['precip'] else None,
+                'tobs': int(row['tobs']) if row['tobs'] else None
+            }
+            for row in reader
+        ]
+        conn.execute(measurements.insert(), measurements_data)
 
-    #zapytanie SQL:
-    results = conn.execute("SELECT * FROM stations LIMIT 5").fetchall()
+    print("Dane zostały wczytane do bazy danych.")
 
-    #wyświetlenie wyników zapytania:
+    #testowanie zapytań SQLAlchemy:
+    #SELECT * FROM stations:
+    results = conn.execute(select([stations])).fetchall()
+    print("Wszystkie rekordy z tabeli 'stations':")
     for result in results:
         print(result)
 
-    #zamykamy połączenie:
+    #SELECT z filtrem:
+    results = conn.execute(select([measurements]).where(measurements.c.station == 'USC00519397')).fetchall()
+    print("\nPomiar dla stacji 'USC00519397':")
+    for result in results:
+        print(result)
+
+    #UPDATE:
+    conn.execute(update(stations).where(stations.c.station == 'USC00519397').values(name='NEW STATION NAME'))
+    print("\nPo aktualizacji nazwy stacji:")
+    result = conn.execute(select([stations]).where(stations.c.station == 'USC00519397')).fetchone()
+    print(result)
+
+    #DELETE:
+    conn.execute(delete(measurements).where(measurements.c.station == 'USC00519397'))
+    print("\nPo usunięciu pomiarów dla stacji 'USC00519397':")
+    remaining_results = conn.execute(select([measurements]).where(measurements.c.station == 'USC00519397')).fetchall()
+    print(remaining_results)
+
+    #zamknięcie połączenia:
     conn.close()
 
-
+#plik główny:
 if __name__ == "__main__":
     create_database()
